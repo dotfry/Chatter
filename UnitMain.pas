@@ -1,20 +1,40 @@
 unit UnitMain;
 
+{
+ TODO:
+  - Removing contacts.
+  - Steam version check.
+  - Did someone have log file move that 4gb? (add support?)
+  - Idea for reading chatlog & recieving new msgs
+  + Dont blow via PlaySound while loading big part of msgs.
+  - Toast windows?
+  - No automatic add to list
+}
 interface uses Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, ExtCtrls, StdCtrls, Global, mmsystem, Buttons, ImgList, SimpleXML;
+  Dialogs, ExtCtrls, StdCtrls, Global, mmsystem, Buttons, ImgList, SimpleXML, UnitFirstStart, UnitAbout,
+  ComCtrls, Menus, Clipbrd;
 
 type
 PoELogVars = record
  LastSize, LastPos: LongWord;
+ FileName, FilePath: string;
+end;
+PoEFlags = record
+ JustInstalled, RequireFlush, MoreDataFollows, PlaySoundAfterLastData: boolean;
+end;
+PoESound = record
+ Internal, Enabled, WhileGameOpen, Guild: boolean;
  FileName: string;
 end;
 PoEVars = record
  Log: PoELogVars;
  Handle: THandle;
- SoundFile, Config: string;
- Sound, LogPublicChannels, RequireFlush, Terminating: boolean;
+ Config: string;
+ LogPublicChannels, LogHistory, RequireFlush, Terminating: boolean;
  XML: IXmlDocument;
  Contacts: IXmlNode;
+ Flags: PoEFlags;
+ Sound: PoESound;
 end;
 
 TfrmMain = class(TForm)
@@ -25,12 +45,23 @@ TfrmMain = class(TForm)
   bSound: TBitBtn;
   il: TImageList;
   cbDebug: TCheckBox;
-  cbHistory: TCheckBox;
+  bAbout: TBitBtn;
+  pnlImportProgress: TPanel;
+  pbImport: TProgressBar;
+  lblImportProgress: TLabel;
+  pmContacts: TPopupMenu;
+  pmDelete: TMenuItem;
+  pmWhisper: TMenuItem;
   procedure tmrMainTimer(Sender: TObject);
-  procedure FormCreate(Sender: TObject);
   procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
   procedure bSoundClick(Sender: TObject);
   procedure lbContactsClick(Sender: TObject);
+  procedure FormShow(Sender: TObject);
+  procedure FormCreate(Sender: TObject);
+  procedure bSettingsClick(Sender: TObject);
+  procedure bAboutClick(Sender: TObject);
+  procedure pmWhisperClick(Sender: TObject);
+  procedure pmDeleteClick(Sender: TObject);
  private
   procedure SoundState();
  public
@@ -44,7 +75,11 @@ TfrmMain = class(TForm)
   function  GetContactHistory(CName: string): string;
   procedure AppendStr(F, S: string);
   function  IsContact(Name: string): boolean;
+  function  DeleteContact(Name: string): boolean;
   procedure CreateContact(Name: string);
+  procedure PlaySoundAlert();
+  procedure SetHistoryState();
+  procedure ApplySettings(Settings: TSetupInfo);
 end;
 
 var
@@ -56,16 +91,52 @@ const
  XMLConfiguration = 'Configuration';
  XMLContacts = 'Contacts';
  XMLC_Alert = 'alert';
- XMLC_Public = 'public';
+ XMLC_History = 'history';
  XMLC_Log = 'logs';
+ XMLC_Public = 'public';
  XMLC_Enabled = 'enabled';
  XMLC_File = 'file';
+ XMLC_NonFile = 'nonfile';
  XMLC_Position = 'position';
  XMLC_Contact = 'contact';
  XMLC_Name = 'name';
+ XMLC_WhileGameOpen = 'gameopen';
+ XMLC_Guild = 'guild';
 var
  Vars: PoEVars;
 {$R *.dfm}
+{$R SoundBase.res}
+
+function  TfrmMain.DeleteContact(Name: string): boolean;
+ procedure DeleteUIContact();
+ var
+  i: integer;
+ begin
+  for i := 0 to lbContacts.Count - 1 do
+  begin
+   if lbContacts.Items[i] = Name then
+   begin
+    lbContacts.Items.Delete(i);
+    exit;
+   end;
+  end;
+ end;
+var
+ i: integer;
+begin
+ Result := false;
+ if Vars.Contacts.ChildNodes.Count = 0 then exit; 
+ for i := 0 to Vars.Contacts.ChildNodes.Count - 1 do
+ begin
+  if Vars.Contacts.ChildNodes[i].GetAttr(XMLC_Name) = Name then
+  begin
+   Result := true;
+   Vars.Contacts.RemoveChild(Vars.Contacts.ChildNodes[i]);
+   DeleteUIContact();
+   exit;
+  end;
+ end;
+end;
 
 function  TfrmMain.IsContact(Name: string): boolean;
 var
@@ -94,9 +165,7 @@ begin
  begin
   tDetailedInfo.Lines.LoadFromFile(sName);
   Vars.RequireFlush := true;
-  cbHistory.Checked := true;
  end else begin
-  cbHistory.Checked := false;
   LogStr(Format('Failed open file history file %s.', [sName]));
  end;
 end;
@@ -130,18 +199,22 @@ begin
   nSub := nCfg.SelectSingleNode(XMLC_Alert);
   if nSub <> nil then
   begin
-   Vars.Sound := StrToBoolDef(nSub.GetAttr(XMLC_Enabled, 'true'), Vars.Sound);
-   Vars.SoundFile := nSub.GetAttr(XMLC_File, Vars.SoundFile);
+   Vars.Sound.Enabled := StrToBoolDef(nSub.GetAttr(XMLC_Enabled, 'true'), Vars.Sound.Enabled);
+   Vars.Sound.FileName := nSub.GetAttr(XMLC_File, Vars.Sound.FileName);
+   Vars.Sound.Internal := StrToBoolDef(nSub.GetAttr(XMLC_NonFile, 'true'), Vars.Sound.Internal);
+   Vars.Sound.WhileGameOpen := StrToBoolDef(nSub.GetAttr(XMLC_WhileGameOpen, 'true'), Vars.Sound.WhileGameOpen);
+   Vars.Sound.Guild := StrToBoolDef(nSub.GetAttr(XMLC_Guild, 'true'), Vars.Sound.Guild);
   end;
-  nSub := nCfg.SelectSingleNode(XMLC_Public);
+  nSub := nCfg.SelectSingleNode(XMLC_History);
   if nSub <> nil then
   begin
-   Vars.LogPublicChannels := StrToBoolDef(nSub.GetAttr(XMLC_Enabled, BoolToStr(Vars.LogPublicChannels)), Vars.LogPublicChannels);
+   Vars.LogHistory := StrToBoolDef(nSub.GetAttr(XMLC_Enabled, BoolToStr(Vars.LogHistory)), Vars.LogHistory);
+   Vars.LogPublicChannels := StrToBoolDef(nSub.GetAttr(XMLC_Public, BoolToStr(Vars.LogPublicChannels)), Vars.LogPublicChannels);
   end;
   nSub := nCfg.SelectSingleNode(XMLC_Log);
   if nSub <> nil then
   begin
-   Vars.Log.FileName := nSub.GetAttr(XMLC_File, Vars.Log.FileName);
+   Vars.Log.FilePath := nSub.GetAttr(XMLC_File, Vars.Log.FilePath);
    Vars.Log.LastPos := StrToIntDef(nSub.GetAttr(XMLC_Position, IntToStr(Vars.Log.LastPos)), Vars.Log.LastPos);
   end;
  end;
@@ -162,25 +235,55 @@ procedure TfrmMain.SaveSettings();
 var
  nCfg, nSub: IXmlNode;
 begin
+ if Vars.XML = nil then exit;
  nCfg := Vars.XML.DocumentElement.SelectSingleNode(XMLConfiguration);
  if nCfg = nil then nCfg := Vars.XML.DocumentElement.AppendElement(XMLConfiguration);
  nSub := nCfg.SelectSingleNode(XMLC_Alert);
  if nSub = nil then nSub := nCfg.AppendElement(XMLC_Alert);
- nSub.SetAttr(XMLC_Enabled, BoolToStr(Vars.Sound));
- nSub.SetAttr(XMLC_File, Vars.SoundFile);
- nSub := nCfg.SelectSingleNode(XMLC_Public);
- if nSub = nil then nSub := nCfg.AppendElement(XMLC_Public);
- nSub.SetAttr(XMLC_Enabled, BoolToStr(Vars.LogPublicChannels)); 
+ nSub.SetAttr(XMLC_Enabled, BoolToStr(Vars.Sound.Enabled));
+ nSub.SetAttr(XMLC_NonFile, BoolToStr(Vars.Sound.Internal));
+ nSub.SetAttr(XMLC_WhileGameOpen, BoolToStr(Vars.Sound.WhileGameOpen));
+ nSub.SetAttr(XMLC_Guild, BoolToStr(Vars.Sound.Guild));
+ nSub.SetAttr(XMLC_File, Vars.Sound.FileName);
+ nSub := nCfg.SelectSingleNode(XMLC_History);
+ if nSub = nil then nSub := nCfg.AppendElement(XMLC_History);
+ nSub.SetAttr(XMLC_Enabled, BoolToStr(Vars.LogHistory));
+ nSub.SetAttr(XMLC_Public, BoolToStr(Vars.LogPublicChannels));
  nSub := nCfg.SelectSingleNode(XMLC_Log);
  if nSub = nil then nSub := nCfg.AppendElement(XMLC_Log);
- nSub.SetAttr(XMLC_File, Vars.Log.FileName);
+ nSub.SetAttr(XMLC_File, Vars.Log.FilePath);
  nSub.SetAttr(XMLC_Position, IntToStr(Vars.Log.LastPos));
  Vars.XML.Save(Vars.Config);
 end;
 
+procedure TfrmMain.bAboutClick(Sender: TObject);
+begin
+ frmAbout.ShowModal();
+end;
+
+procedure TfrmMain.bSettingsClick(Sender: TObject);
+var
+ Settings: TSetupInfo;
+begin
+ Settings.Path := Vars.Log.FilePath;
+ Settings.InternalSound := Vars.Sound.Internal;
+ Settings.CustomSound := Vars.Sound.FileName;
+ Settings.PlayWhenGameOpen := Vars.Sound.WhileGameOpen;
+ Settings.LogPublic := Vars.LogPublicChannels;
+ Settings.LogHistory := Vars.LogHistory;
+ Settings.AlertGuildChat := Vars.Sound.Guild;
+ //Settings.
+ if frmFirstStart.Configure(Settings) then
+ begin
+  ApplySettings(Settings);
+  SoundState();
+  SetHistoryState();
+ end;
+end;
+
 procedure TfrmMain.bSoundClick(Sender: TObject);
 begin
- Vars.Sound := not Vars.Sound;
+ Vars.Sound.Enabled := not Vars.Sound.Enabled;
  SoundState();
 end;
 
@@ -194,7 +297,7 @@ var
  bTemp: TBitmap;
 begin
  bTemp := TBitmap.Create();
- il.GetBitmap(getImageId(Vars.Sound), bTemp);
+ il.GetBitmap(getImageId(Vars.Sound.Enabled), bTemp);
  bSound.Glyph := bTemp;
  FreeAndNil(bTemp);
 end;
@@ -206,55 +309,108 @@ begin
 end;
 
 procedure TfrmMain.FormCreate(Sender: TObject);
-const
- FILE_LIST_DIRECTORY = FILE_SHARE_READ;
+begin
+ {$IFDEF RELEASE}
+ cbDebug.Visible := false;
+ cbDebug.Checked := false;
+ {$ENDIF}
+end;
+
+procedure TfrmMain.FormShow(Sender: TObject);
+var
+ Settings: TSetupInfo;
 begin
  Vars.Config := ChangeFileExt(Application.ExeName, '.xml');
  Vars.Handle := INVALID_HANDLE_VALUE;
- Vars.Sound := true;
- Vars.Log.FileName := IncludeTrailingPathDelimiter(poeLocateInstall()) + 'logs\Client.txt';
- Vars.Log.LastSize := poeFileSize(Vars.Log.FileName);
- Vars.Log.LastPos := poeFileSize(Vars.Log.FileName);
- LoadSettings();
- if not FileExists(Vars.Log.FileName) then Vars.Log.FileName := IncludeTrailingPathDelimiter(poeLocateInstall()) + 'logs\Client.txt';
- if not FileExists(Vars.SoundFile) then Vars.SoundFile := IncludeTrailingPathDelimiter(ExtractFilePath(Application.ExeName)) + 'incoming.wav';
- SoundState();
- if not FileExists(Vars.Log.FileName) then
+ Vars.Sound.Enabled := true;
+ Vars.Sound.Internal := true;
+ Vars.Sound.FileName := '';
+ LoadSettings(); // Required for future "save" settings.
+ if not FileExists(Vars.Config) then
  begin
-  MessageBox(Handle, 'Cannot find Path of Exile installation.', 'Error', MB_ICONERROR);
+  if not frmFirstStart.Setup(Settings) then
+  begin
+   Close();
+   exit;
+  end;
+  Vars.Log.LastPos := 0;
+  Vars.Log.LastSize := 0;
+  Vars.Flags.JustInstalled := true;
+  ApplySettings(Settings);
+  SoundState();
+  SetHistoryState();
+  tmrMain.Enabled := true;
   exit;
  end;
+ LoadSettings();
+ Vars.Flags.JustInstalled := false;
+ SoundState();
+ SetHistoryState();
  tmrMain.Enabled := true;
- LogStr(Format('Loaded. "%s".baseSize=%d.', [Vars.Log.FileName, Vars.Log.LastSize]));
 end;
-
 
 procedure TfrmMain.tmrMainTimer(Sender: TObject);
 var
  fSize: LongWord;
 begin
  // FUCKING YES. I tryed ReadDirectoryChangesW. It didn't work.
- // TODO: Move all vars to int64.
+ if Vars.Log.FileName = '' then
+ begin
+  Vars.Log.FileName := IncludeTrailingPathDelimiter(Vars.Log.FilePath) + 'logs\Client.txt';
+ end;
  fSize := poeFileSize(Vars.Log.FileName);
+ // TODO: Move all vars to int64.
+ // TODO: Check steam version.
+ // TODO: Add more checks?
  if Vars.Handle = INVALID_HANDLE_VALUE then Vars.Handle := FindWindow('Direct3DWindowClass', 'Path of Exile');
  LogStr(Format('DBG: FileSizes: %d-%d. ~%dmb', [Vars.Log.LastSize, fSize, fSize div 1024 div 1024]), true);
  if (Vars.Log.LastSize <> fSize) {or (Vars.Log.LastPos < fSize)} then
  begin
-  LogStr(Format('DBG: FileUpdated.', []), true);
-  Vars.Log.LastSize := fSize;
-  Vars.Log.LastPos := fSize;
   tmrMain.Enabled := false;
+  LogStr(Format('DBG: FileUpdated.', []), true);
+  if Vars.Flags.JustInstalled then
+  begin
+   if MessageBox(Handle, 'Chatter just installed. Import ALL history?', 'History', MB_YESNO + MB_ICONQUESTION) <> IDYES then
+   begin
+    Vars.Log.LastSize := fSize;
+    Vars.Log.LastPos := fSize;
+    exit;
+   end else begin
+    pnlImportProgress.Visible := true;
+   end;
+  end;
+  Vars.Log.LastSize := fSize;
   LoadNewData();
+  Vars.Log.LastPos := fSize;
+  Vars.Flags.JustInstalled := false;
+  pnlImportProgress.Visible := false;
   tmrMain.Enabled := true;
  end;
 end;
 
 procedure TfrmMain.LoadNewData();
+const
+ MaxBufferSize = 10240;
 var
  fHandle: THandle;
  pText: PChar;
  sNewData: widestring;
- iBuffSize: DWord;
+ iBuffSize, iTmpBuffSize: DWord;
+ function ReadRawData(BuffSize: integer): string;
+ begin
+  GetMem(pText, BuffSize);
+  LogStr(Format('DBG: Reading buffer: %d.', [BuffSize]), true);
+  if FileRead(fHandle, pText[0], BuffSize) = -1 then
+  begin
+   LogStr('BN: Read failed.', true);
+   FreeMem(pText);
+   exit;
+  end;
+  Result := pText;
+  FreeMem(pText);
+ end;
+var
+ iLastCr, i: integer;
 begin
  fHandle := poeOpenFile(Vars.Log.FileName);
  if SetFilePointer(fHandle, Vars.Log.LastPos, nil, FILE_BEGIN) = INVALID_SET_FILE_POINTER then
@@ -262,19 +418,54 @@ begin
   LogStr('BN: Seek failed.', true);
   exit;
  end;
- iBuffSize := Vars.Log.LastSize - Vars.Log.LastPos - 1;
- Vars.Log.LastPos := Vars.Log.LastSize;
- GetMem(pText, iBuffSize);
- LogStr(Format('DBG: Reading buffer: %d.', [iBuffSize]), true);
- if FileRead(fHandle, pText[0], iBuffSize) = -1 then
+ iBuffSize := Vars.Log.LastSize - Vars.Log.LastPos;
+ if iBuffSize > MaxBufferSize then
  begin
-  LogStr('BN: Read failed.', true);
-  exit;
+  // All | Remain.
+  if pnlImportProgress.Visible then
+  begin
+   pbImport.Max := iBuffSize div MaxBufferSize;
+   pbImport.Min := 0;
+   i := 0;
+   pbImport.Position := i;
+  end;
+  while iBuffSize > 0 do
+  begin
+   if pnlImportProgress.Visible then
+   begin
+    Inc(i);
+    pbImport.Position := i;
+    lblImportProgress.Caption := Format(lblImportProgress.HelpKeyword, [i, pbImport.Max]);
+    Application.ProcessMessages();
+   end;
+   iTmpBuffSize := iBuffSize;
+   if iTmpBuffSize > MaxBufferSize then
+   begin
+    iTmpBuffSize := MaxBufferSize;
+   end;
+   Dec(iBuffSize, iTmpBuffSize);
+   sNewData := ReadRawData(MaxBufferSize);
+   iLastCr := StrRPos(#13, sNewData);
+   if (iLastCr < Length(sNewData) - 2) and (iLastCr <> -1) then
+   begin
+    // Usially only first seek can fail.
+    SetFilePointer(fHandle, iLastCr - Length(sNewData) - 1, nil, FILE_CURRENT);
+    sNewData := Copy(sNewData, 0, iLastCr);
+   end;
+   Vars.Flags.MoreDataFollows := true;
+   HandleData(sNewData);
+  end;
+ end else begin
+  sNewData := ReadRawData(iBuffSize);
+  Vars.Log.LastPos := Vars.Log.LastSize;
+  HandleData(sNewData);
  end;
- sNewData := pText;
- FreeMem(pText);
- HandleData(sNewData);
- LogStr(Format('DBG: Readed: %d; "%s".', [Length(sNewData), sNewData]), true);
+ if Vars.Flags.PlaySoundAfterLastData then
+ begin
+  Vars.Flags.MoreDataFollows := false;
+  Vars.Flags.PlaySoundAfterLastData := false;
+  PlaySoundAlert();
+ end;
 end;
 
 procedure TfrmMain.HandleData(Str: string);
@@ -287,13 +478,14 @@ begin
  for i := 0 to slTemp.Count - 1 do
  begin
   HandleLine(slTemp[i]);
- end;  
+ end;
+ slTemp.Free();
 end;
 
 // 2015/06/13 15:52:28 18251336 22d [INFO Client 3084] TopSkill: qq
 procedure TfrmMain.HandleLine(Str: string);
 const
- aChannels: array[0..4] of string = ('#', '^', '$', '@', '%');
+ aChannels: array[0..5] of string = ('#', '^', '$', '@', '%', '&');
 var
  iPos, i: integer;
  sShortInfo, sAvgTime: string;
@@ -329,21 +521,100 @@ begin
  HandleMessage(sChannel, sAuthor, sShortInfo, dtInfo);
 end;
 
+procedure TfrmMain.PlaySoundAlert();
+begin
+ // Dont blow things up due import. //
+ if Vars.Flags.MoreDataFollows then
+ begin
+  Vars.Flags.PlaySoundAfterLastData := true;
+  exit;
+ end;
+ if Vars.Flags.JustInstalled then
+ begin                 
+  exit;
+ end;
+ if (GetForegroundWindow() <> Vars.Handle) or (Vars.Sound.WhileGameOpen) then
+ begin
+  if Vars.Sound.Internal then
+  begin
+   PlaySound('Incoming', Application.Handle, SND_ASYNC and SND_RESOURCE);
+  end else begin
+   if FileExists(Vars.Sound.FileName) then
+   begin
+    PlaySound(PChar(Vars.Sound.FileName), 0, SND_ASYNC);
+   end else begin
+    // Playing "internal" (because user file broken).
+    PlaySound(PChar(Name), Application.Handle, SND_ASYNC and SND_RESOURCE);
+   end;
+  end;
+ end;
+ //
+end;
+
+procedure TfrmMain.pmDeleteClick(Sender: TObject);
+//var
+// sTemp: string;
+begin
+ if lbContacts.ItemIndex >= 0 then
+ begin
+  DeleteContact(lbContacts.Items[lbContacts.ItemIndex]);
+ end;
+end;
+
+procedure TfrmMain.pmWhisperClick(Sender: TObject);
+var
+ sTemp: string;
+begin
+ if lbContacts.ItemIndex >= 0 then
+ begin
+  sTemp := lbContacts.Items[lbContacts.ItemIndex];
+  if Length(sTemp) > 1 then
+  begin
+   Clipboard.AsText := '@' + sTemp + ' ';
+  end;
+ end;
+end;
+
+procedure TfrmMain.SetHistoryState();
+begin
+ lbContacts.Visible := Vars.LogHistory;
+ if Vars.LogHistory then
+ begin
+  tDetailedInfo.Width := ClientWidth - tDetailedInfo.Left * 3 - lbContacts.Width;
+ end else begin
+  tDetailedInfo.Width := ClientWidth - tDetailedInfo.Left * 2;
+ end;
+end;
+
+procedure TfrmMain.ApplySettings(Settings: TSetupInfo);
+begin
+ Vars.Log.FilePath := Settings.Path;
+ Vars.Log.FileName := IncludeTrailingPathDelimiter(Settings.Path) + 'logs\Client.txt';
+ Vars.Sound.Internal := Settings.InternalSound;
+ Vars.Sound.FileName := Settings.CustomSound;
+ Vars.Sound.Guild := Settings.AlertGuildChat;
+ Vars.Sound.WhileGameOpen := Settings.PlayWhenGameOpen;
+ Vars.LogPublicChannels := Settings.LogPublic;
+ Vars.LogHistory := Settings.LogHistory;
+end;
+
 procedure TfrmMain.HandleMessage(Channel, Author, Msg: String; Date: TDateTime);
 var
  sLogFile: string;
  Hist: string;
 begin
  LogStr(Format('[%s] %s %s: %s', [DateTimeToStr(Date), Channel, Author, Msg]));
- if (Channel = '@') and Vars.Sound then
+ if (Channel = '@') and Vars.Sound.Enabled then
  begin
-  if GetForegroundWindow() <> Vars.Handle then
-  begin
-   if FileExists(Vars.SoundFile) then
-   begin
-    PlaySound(PChar(Vars.SoundFile), 0, SND_ASYNC);
-   end;
-  end
+  PlaySoundAlert();
+ end;
+ if (Channel = '&') and Vars.Sound.Enabled and Vars.Sound.Guild then
+ begin
+  PlaySoundAlert();
+ end;
+ if not Vars.LogHistory then
+ begin
+  exit;
  end;
  if Channel = '@' then
  begin
@@ -351,7 +622,7 @@ begin
   Hist := format('[%s] %s', [DateTimeToStr(Date), Msg]);
   AppendStr(sLogFile, Hist);
  end;
- if (((Channel = '#') or (Channel = '$') or (Channel = '^')) and Vars.LogPublicChannels) or (Channel = '%') or (Channel = '') then
+ if (((Channel = '#') or (Channel = '$') or (Channel = '^')) and Vars.LogPublicChannels) or (Channel = '%') or (Channel = '') or (Channel = '&') then
  begin
   sLogFile := GetContactHistory(Channel);
   Hist := format('[%s] %s: %s', [DateTimeToStr(Date), Author, Msg]);
@@ -362,7 +633,6 @@ end;
 procedure TfrmMain.LogStr(Str: string; DebugFlag: boolean = false);
 begin
  if DebugFlag and not cbDebug.Checked then exit;
- if cbHistory.Checked then exit;
  if Vars.RequireFlush then tDetailedInfo.Lines.Clear();
  Vars.RequireFlush := false;
  tDetailedInfo.Lines.Add(Str);

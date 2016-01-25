@@ -2,10 +2,34 @@ unit Global;
 
 interface uses Windows, SysUtils;
 
+type
+ PEditBallonTip = ^TEditBallonTip;
+ TEditBallonTip = packed record
+  cbStruct: DWORD;
+  pszTitle: PWideChar;
+  pszText: PWideChar;
+  ttiIcon: Integer;
+ end;
+
+const
+ ECM_FIRST = $1500;
+ EM_SHOWBALLOONTIP = (ECM_FIRST + 3);
+ TTI_NONE = 0;
+ TTI_INFO = 1;
+ TTI_WARNING = 2;
+ TTI_ERROR = 3;
+ 
 const
  INVALID_SET_FILE_POINTER = INVALID_HANDLE_VALUE;
 
+ POE_EXE_NAME = 'PathOfExile.exe';
 type
+ TSetupInfo = record
+  Done: boolean;
+  Path, CustomSound: string;
+  InternalSound, PlayWhenGameOpen: boolean;
+  LogPublic, LogHistory, AlertGuildChat: boolean;
+ end;
 
  TStringArr = array of string;
 
@@ -20,7 +44,31 @@ type
  function explode(cDelimiter, sValue :string; iCount: integer = 0): TStringArr;
  function poeLocateInstall(): string;
  function poeReadRegKey(Path, Key: string): string;
+
+ function StrToWChar(Source: string; var Dest: PWideChar): Integer;
+ procedure adShowWinMsg(EditCtl: HWnd; Text: string; Caption: string; Icon: Integer; Balloon: Boolean = True);
+
+ function StrRPos(const SubStr, Str: string): Integer;
 implementation
+
+ function StrRPos(const SubStr, Str: string): Integer;
+ var
+  i, SubStrLen: Integer;
+ begin
+  Result := -1;
+
+  SubStrLen := Length(SubStr);
+  if (SubStrLen = 0) then Exit;
+
+  for i := Succ(Length(Str)-SubStrLen) downto 1 do
+    if (SubStr[1] = Str[i]) then
+      if Copy(Str,i,SubStrLen) = SubStr then
+      begin
+        Result := i;
+        Exit;
+      end;
+
+ end;
 
  function poeReadRegKey(Path, Key: string): string;
  var
@@ -71,7 +119,7 @@ implementation
  function poeFileSize(FileName: string): Int64;
  var
   fHandle: THandle;
-  fSize: LongWord;
+  //fSize: LongWord;
   pSize: Int64;
  begin
   //Result := GetCompressedFileSize(PChar(FileName), nil);
@@ -115,4 +163,39 @@ implementation
  end;
 
 
+function StrToWChar(Source: string; var Dest: PWideChar): Integer;
+begin
+ Result := (Length(Source) * SizeOf(WideChar)) + 1;
+ GetMem(Dest, Result);
+ Dest := StringToWideChar(Source, Dest, Result);
+end;
+
+procedure adShowWinMsg(EditCtl: HWnd; Text: string; Caption: string; Icon: Integer; Balloon: Boolean = True);
+var
+ ebt: TEditBallonTip;
+ btn: Integer;
+ l1, l2: Integer;
+begin
+ //if not adIsWinXP then Balloon := False;
+ if Balloon then
+ begin
+  FillChar(ebt, sizeof(ebt), 0);
+  l1 := StrToWChar(Caption, ebt.pszTitle);
+  l2 := StrToWChar(Text, ebt.pszText);
+  ebt.ttiIcon := Icon;
+  ebt.cbStruct := sizeof(ebt);
+  SendMessage(EditCtl, EM_SHOWBALLOONTIP, 0, LongInt(@ebt));
+  FreeMem(ebt.pszTitle, l1);
+  FreeMem(ebt.pszText, l2);
+ end else begin
+  case Icon of
+   TTI_INFO: btn := MB_ICONINFORMATION;
+   TTI_WARNING: btn := MB_ICONWARNING;
+   TTI_ERROR: btn := MB_ICONERROR;
+  else
+   btn := 0;
+  end;
+  MessageBox(EditCtl, PChar(Text), PChar(Caption), btn);
+ end;
+end;
 end.

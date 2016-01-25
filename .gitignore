@@ -51,13 +51,14 @@
 
 # Delphi history and backups
 __history/
+__res/
 *.~*
 
 # Chatter history
 history/
 
 #Chatter config
-poe_chat.xml
+Chatter.xml
 
 # =========================
 # Operating System Files
