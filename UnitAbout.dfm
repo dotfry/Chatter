@@ -3081,6 +3081,7 @@ object frmAbout: TfrmAbout
     Top = 108
     Width = 72
     Height = 13
+    Cursor = crHandPoint
     Caption = '6dreams.net'
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clPurple

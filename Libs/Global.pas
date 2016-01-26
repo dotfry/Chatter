@@ -58,15 +58,19 @@ implementation
   Result := -1;
 
   SubStrLen := Length(SubStr);
-  if (SubStrLen = 0) then Exit;
+  if SubStrLen = 0 then Exit;
 
   for i := Succ(Length(Str)-SubStrLen) downto 1 do
-    if (SubStr[1] = Str[i]) then
-      if Copy(Str,i,SubStrLen) = SubStr then
-      begin
-        Result := i;
-        Exit;
-      end;
+  begin
+   if (SubStr[1] = Str[i]) then
+   begin
+    if Copy(Str,i,SubStrLen) = SubStr then
+    begin
+     Result := i;
+     Exit;
+    end;
+   end;
+  end;
 
  end;
 

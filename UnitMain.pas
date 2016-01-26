@@ -2,13 +2,14 @@ unit UnitMain;
 
 {
  TODO:
-  - Removing contacts.
+  + Removing contacts.
   - Steam version check.
-  - Did someone have log file move that 4gb? (add support?)
-  - Idea for reading chatlog & recieving new msgs
+  ? Did someone have log file move that 4gb? (add support?)
+  + Idea for reading chatlog & recieving new msgs
   + Dont blow via PlaySound while loading big part of msgs.
-  - Toast windows?
+  ? Toast windows
   - No automatic add to list
+  - Fix client restart
 }
 interface uses Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
   Dialogs, ExtCtrls, StdCtrls, Global, mmsystem, Buttons, ImgList, SimpleXML, UnitFirstStart, UnitAbout,
@@ -20,7 +21,7 @@ PoELogVars = record
  FileName, FilePath: string;
 end;
 PoEFlags = record
- JustInstalled, RequireFlush, MoreDataFollows, PlaySoundAfterLastData: boolean;
+ JustInstalled, RequireFlush, MoreDataFollows, PlaySoundAfterLastData, StopImport, DontRefreshViaPublic: boolean;
 end;
 PoESound = record
  Internal, Enabled, WhileGameOpen, Guild: boolean;
@@ -52,6 +53,8 @@ TfrmMain = class(TForm)
   pmContacts: TPopupMenu;
   pmDelete: TMenuItem;
   pmWhisper: TMenuItem;
+  bStopImport: TButton;
+  bClear: TBitBtn;
   procedure tmrMainTimer(Sender: TObject);
   procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
   procedure bSoundClick(Sender: TObject);
@@ -62,6 +65,8 @@ TfrmMain = class(TForm)
   procedure bAboutClick(Sender: TObject);
   procedure pmWhisperClick(Sender: TObject);
   procedure pmDeleteClick(Sender: TObject);
+  procedure bStopImportClick(Sender: TObject);
+  procedure bClearClick(Sender: TObject);
  private
   procedure SoundState();
  public
@@ -165,6 +170,7 @@ begin
  begin
   tDetailedInfo.Lines.LoadFromFile(sName);
   Vars.RequireFlush := true;
+  Vars.Flags.DontRefreshViaPublic := true;
  end else begin
   LogStr(Format('Failed open file history file %s.', [sName]));
  end;
@@ -261,6 +267,11 @@ begin
  frmAbout.ShowModal();
 end;
 
+procedure TfrmMain.bClearClick(Sender: TObject);
+begin
+ tDetailedInfo.Clear();
+end;
+
 procedure TfrmMain.bSettingsClick(Sender: TObject);
 var
  Settings: TSetupInfo;
@@ -285,6 +296,11 @@ procedure TfrmMain.bSoundClick(Sender: TObject);
 begin
  Vars.Sound.Enabled := not Vars.Sound.Enabled;
  SoundState();
+end;
+
+procedure TfrmMain.bStopImportClick(Sender: TObject);
+begin
+ Vars.Flags.StopImport := true;
 end;
 
 procedure TfrmMain.SoundState();
@@ -352,28 +368,41 @@ end;
 procedure TfrmMain.tmrMainTimer(Sender: TObject);
 var
  fSize: LongWord;
+ hPoe: THandle;
 begin
  // FUCKING YES. I tryed ReadDirectoryChangesW. It didn't work.
  if Vars.Log.FileName = '' then
  begin
   Vars.Log.FileName := IncludeTrailingPathDelimiter(Vars.Log.FilePath) + 'logs\Client.txt';
  end;
+ if GetForegroundWindow() <> Handle then
+ begin
+  Vars.Flags.DontRefreshViaPublic := false;
+ end;
  fSize := poeFileSize(Vars.Log.FileName);
  // TODO: Move all vars to int64.
  // TODO: Check steam version.
  // TODO: Add more checks?
- if Vars.Handle = INVALID_HANDLE_VALUE then Vars.Handle := FindWindow('Direct3DWindowClass', 'Path of Exile');
+ if Vars.Handle = INVALID_HANDLE_VALUE then
+ begin
+  hPoe := FindWindow('Direct3DWindowClass', 'Path of Exile');
+  if hPoe <> INVALID_HANDLE_VALUE then
+  begin
+   Vars.Handle := hPoe;
+  end;
+ end;
  LogStr(Format('DBG: FileSizes: %d-%d. ~%dmb', [Vars.Log.LastSize, fSize, fSize div 1024 div 1024]), true);
  if (Vars.Log.LastSize <> fSize) {or (Vars.Log.LastPos < fSize)} then
  begin
   tmrMain.Enabled := false;
   LogStr(Format('DBG: FileUpdated.', []), true);
-  if Vars.Flags.JustInstalled then
+  if Vars.Flags.JustInstalled and Vars.LogHistory then
   begin
    if MessageBox(Handle, 'Chatter just installed. Import ALL history?', 'History', MB_YESNO + MB_ICONQUESTION) <> IDYES then
    begin
     Vars.Log.LastSize := fSize;
     Vars.Log.LastPos := fSize;
+    tmrMain.Enabled := true;
     exit;
    end else begin
     pnlImportProgress.Visible := true;
@@ -422,11 +451,11 @@ begin
  if iBuffSize > MaxBufferSize then
  begin
   // All | Remain.
+  i := 0;
   if pnlImportProgress.Visible then
   begin
    pbImport.Max := iBuffSize div MaxBufferSize;
    pbImport.Min := 0;
-   i := 0;
    pbImport.Position := i;
   end;
   while iBuffSize > 0 do
@@ -437,6 +466,14 @@ begin
     pbImport.Position := i;
     lblImportProgress.Caption := Format(lblImportProgress.HelpKeyword, [i, pbImport.Max]);
     Application.ProcessMessages();
+    if Vars.Flags.StopImport then
+    begin
+     // Wipe all imported data, return;
+     Vars.Contacts.RemoveAllChilds();
+     lbContacts.Clear();
+     tDetailedInfo.Clear();
+     exit;
+    end;
    end;
    iTmpBuffSize := iBuffSize;
    if iTmpBuffSize > MaxBufferSize then
@@ -477,7 +514,8 @@ begin
  slTemp.Text := Str;
  for i := 0 to slTemp.Count - 1 do
  begin
-  HandleLine(slTemp[i]);
+  // UTF8 Fix
+  HandleLine(UTF8Decode(slTemp[i]));
  end;
  slTemp.Free();
 end;
@@ -537,14 +575,14 @@ begin
  begin
   if Vars.Sound.Internal then
   begin
-   PlaySound('Incoming', Application.Handle, SND_ASYNC and SND_RESOURCE);
+   PlaySound('REALGOODSND', 0, SND_ASYNC and SND_RESOURCE);
   end else begin
    if FileExists(Vars.Sound.FileName) then
    begin
     PlaySound(PChar(Vars.Sound.FileName), 0, SND_ASYNC);
    end else begin
     // Playing "internal" (because user file broken).
-    PlaySound(PChar(Name), Application.Handle, SND_ASYNC and SND_RESOURCE);
+    PlaySound('REALGOODSND', 0, SND_ASYNC and SND_RESOURCE);
    end;
   end;
  end;
@@ -552,8 +590,6 @@ begin
 end;
 
 procedure TfrmMain.pmDeleteClick(Sender: TObject);
-//var
-// sTemp: string;
 begin
  if lbContacts.ItemIndex >= 0 then
  begin
@@ -606,11 +642,13 @@ begin
  LogStr(Format('[%s] %s %s: %s', [DateTimeToStr(Date), Channel, Author, Msg]));
  if (Channel = '@') and Vars.Sound.Enabled then
  begin
-  PlaySoundAlert();
+  //PlaySoundAlert();
+  Vars.Flags.PlaySoundAfterLastData := true;
  end;
  if (Channel = '&') and Vars.Sound.Enabled and Vars.Sound.Guild then
  begin
-  PlaySoundAlert();
+  //PlaySoundAlert();
+  Vars.Flags.PlaySoundAfterLastData := true;
  end;
  if not Vars.LogHistory then
  begin
@@ -622,7 +660,7 @@ begin
   Hist := format('[%s] %s', [DateTimeToStr(Date), Msg]);
   AppendStr(sLogFile, Hist);
  end;
- if (((Channel = '#') or (Channel = '$') or (Channel = '^')) and Vars.LogPublicChannels) or (Channel = '%') or (Channel = '') or (Channel = '&') then
+ if (((Channel = '#') or (Channel = '$') or (Channel = '^')) and Vars.LogPublicChannels and not Vars.Flags.DontRefreshViaPublic) or (Channel = '%') or (Channel = '') or (Channel = '&') then
  begin
   sLogFile := GetContactHistory(Channel);
   Hist := format('[%s] %s: %s', [DateTimeToStr(Date), Author, Msg]);
@@ -634,6 +672,15 @@ procedure TfrmMain.LogStr(Str: string; DebugFlag: boolean = false);
 begin
  if DebugFlag and not cbDebug.Checked then exit;
  if Vars.RequireFlush then tDetailedInfo.Lines.Clear();
+ if tDetailedInfo.Lines.Count > 500 then
+ begin
+  if pnlImportProgress.Visible then
+  begin
+   tDetailedInfo.Clear();
+  end else begin
+   tDetailedInfo.Lines.Delete(0);
+  end;
+ end;
  Vars.RequireFlush := false;
  tDetailedInfo.Lines.Add(Str);
 end;
