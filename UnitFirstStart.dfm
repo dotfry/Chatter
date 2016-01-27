@@ -55,6 +55,44 @@ object frmFirstStart: TfrmFirstStart
     Font.Style = [fsItalic]
     ParentFont = False
   end
+  object pnlStep3: TPanel
+    Left = 8
+    Top = 33
+    Width = 507
+    Height = 192
+    HelpType = htKeyword
+    HelpKeyword = 'History settings'
+    TabOrder = 5
+    object cbSaveHistory: TCheckBox
+      Left = 42
+      Top = 24
+      Width = 97
+      Height = 17
+      Caption = 'Save history'
+      Checked = True
+      State = cbChecked
+      TabOrder = 0
+      OnClick = cbSaveHistoryClick
+    end
+    object cbSaveChannels: TCheckBox
+      Left = 42
+      Top = 92
+      Width = 191
+      Height = 17
+      Caption = 'Save history for public channels'
+      Checked = True
+      State = cbChecked
+      TabOrder = 1
+    end
+    object cbSaveOnlyAdded: TCheckBox
+      Left = 42
+      Top = 47
+      Width = 175
+      Height = 17
+      Caption = 'Don'#39't add new contacts'
+      TabOrder = 2
+    end
+  end
   object pnlStep1: TPanel
     Left = 8
     Top = 33
@@ -111,6 +149,7 @@ object frmFirstStart: TfrmFirstStart
       Checked = True
       TabOrder = 0
       TabStop = True
+      OnClick = rbInternalSoundClick
     end
     object rbCustomSound: TRadioButton
       Left = 42
@@ -118,8 +157,8 @@ object frmFirstStart: TfrmFirstStart
       Width = 113
       Height = 17
       Caption = 'Custom sound'
-      Enabled = False
       TabOrder = 1
+      OnClick = rbInternalSoundClick
     end
     object cbPlayWhenPoEOpen: TCheckBox
       Left = 42
@@ -137,35 +176,20 @@ object frmFirstStart: TfrmFirstStart
       Caption = 'Also alert guild chat messages'
       TabOrder = 3
     end
-  end
-  object pnlStep3: TPanel
-    Left = 8
-    Top = 33
-    Width = 507
-    Height = 192
-    HelpType = htKeyword
-    HelpKeyword = 'History settings'
-    TabOrder = 5
-    object cbSaveHistory: TCheckBox
-      Left = 42
-      Top = 24
-      Width = 97
-      Height = 17
-      Caption = 'Save history'
-      Checked = True
-      State = cbChecked
-      TabOrder = 0
-      OnClick = cbSaveHistoryClick
+    object tCustomSound: TEdit
+      Left = 56
+      Top = 78
+      Width = 217
+      Height = 21
+      TabOrder = 4
     end
-    object cbSaveChannels: TCheckBox
-      Left = 42
-      Top = 92
-      Width = 191
-      Height = 17
-      Caption = 'Save history for public channels'
-      Checked = True
-      State = cbChecked
-      TabOrder = 1
+    object bBrowseCustom: TButton
+      Left = 279
+      Top = 76
+      Width = 75
+      Height = 25
+      Caption = #8230
+      TabOrder = 5
     end
   end
   object bBack: TButton
@@ -220,5 +244,10 @@ object frmFirstStart: TfrmFirstStart
     TabOrder = 7
     Visible = False
     OnChange = cbStepChange
+  end
+  object ood: TOpenDialog
+    Filter = 'Wave file (*.wav)|*.wav'
+    Left = 320
+    Top = 48
   end
 end

@@ -28,6 +28,10 @@ TfrmFirstStart = class(TForm)
   bSave: TButton;
   cbStep: TComboBox;
   cbAlertGuildChat: TCheckBox;
+  cbSaveOnlyAdded: TCheckBox;
+    tCustomSound: TEdit;
+    bBrowseCustom: TButton;
+    ood: TOpenDialog;
   procedure bNextClick(Sender: TObject);
   procedure bExitClick(Sender: TObject);
   procedure bBrowsePathClick(Sender: TObject);
@@ -35,6 +39,7 @@ TfrmFirstStart = class(TForm)
   procedure cbSaveHistoryClick(Sender: TObject);
   procedure cbStepChange(Sender: TObject);
   procedure bSaveClick(Sender: TObject);
+    procedure rbInternalSoundClick(Sender: TObject);
  private
   SetupDone: boolean;
   IsSetup: boolean;
@@ -165,7 +170,14 @@ begin
  Settings.LogPublic := cbSaveChannels.Checked;
  Settings.LogHistory := cbSaveHistory.Checked;
  Settings.AlertGuildChat := cbAlertGuildChat.Checked;
- Settings.CustomSound := ''; // TODO: Add option for that.
+ Settings.NoNewContacts := cbSaveOnlyAdded.Checked;
+ Settings.CustomSound := tCustomSound.Text; // TODO: Add option for that.
+end;
+
+procedure TfrmFirstStart.rbInternalSoundClick(Sender: TObject);
+begin
+ bBrowseCustom.Enabled := rbCustomSound.Checked;
+ tCustomSound.Enabled := rbCustomSound.Checked;
 end;
 
 function TfrmFirstStart.Setup(var Settings: TSetupInfo): boolean;
@@ -202,7 +214,8 @@ begin
  lblStepInfo.Visible := false;
  // Settings > Form
  tGamePath.Text := Settings.Path;
- // Settings.CustomSound;
+ cbSaveOnlyAdded.Checked := Settings.NoNewContacts;
+ tCustomSound.Text := Settings.CustomSound;
  rbInternalSound.Checked := Settings.InternalSound;
  cbPlayWhenPoEOpen.Checked := Settings.PlayWhenGameOpen;
  cbSaveHistory.Checked := Settings.LogHistory;

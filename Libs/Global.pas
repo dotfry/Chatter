@@ -28,7 +28,7 @@ type
   Done: boolean;
   Path, CustomSound: string;
   InternalSound, PlayWhenGameOpen: boolean;
-  LogPublic, LogHistory, AlertGuildChat: boolean;
+  LogPublic, LogHistory, AlertGuildChat, NoNewContacts: boolean;
  end;
 
  TStringArr = array of string;
