@@ -8,8 +8,9 @@ unit UnitMain;
   + Idea for reading chatlog & recieving new msgs
   + Dont blow via PlaySound while loading big part of msgs.
   ? Toast windows
-  - No automatic add to list
-  - Fix client restart
+  ~ No automatic add to list
+  - Manual adding to list :)
+  + Fix client restart
 }
 interface uses Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
   Dialogs, ExtCtrls, StdCtrls, Global, mmsystem, Buttons, ImgList, SimpleXML, UnitFirstStart, UnitAbout,
@@ -31,7 +32,7 @@ PoEVars = record
  Log: PoELogVars;
  Handle: THandle;
  Config: string;
- LogPublicChannels, LogHistory, RequireFlush, Terminating: boolean;
+ LogPublicChannels, LogHistory, RequireFlush, Terminating, NoAddNewContacts: boolean;
  XML: IXmlDocument;
  Contacts: IXmlNode;
  Flags: PoEFlags;
@@ -283,6 +284,7 @@ begin
  Settings.LogPublic := Vars.LogPublicChannels;
  Settings.LogHistory := Vars.LogHistory;
  Settings.AlertGuildChat := Vars.Sound.Guild;
+ Settings.NoNewContacts := Vars.NoAddNewContacts;
  //Settings.
  if frmFirstStart.Configure(Settings) then
  begin
@@ -340,7 +342,7 @@ begin
  Vars.Handle := INVALID_HANDLE_VALUE;
  Vars.Sound.Enabled := true;
  Vars.Sound.Internal := true;
- Vars.Sound.FileName := '';
+ //Vars.Sound.FileName := '';
  LoadSettings(); // Required for future "save" settings.
  if not FileExists(Vars.Config) then
  begin
@@ -403,6 +405,7 @@ begin
     Vars.Log.LastSize := fSize;
     Vars.Log.LastPos := fSize;
     tmrMain.Enabled := true;
+    Vars.Flags.JustInstalled := false;
     exit;
    end else begin
     pnlImportProgress.Visible := true;
@@ -631,6 +634,7 @@ begin
  Vars.Sound.Guild := Settings.AlertGuildChat;
  Vars.Sound.WhileGameOpen := Settings.PlayWhenGameOpen;
  Vars.LogPublicChannels := Settings.LogPublic;
+ Vars.NoAddNewContacts := Settings.NoNewContacts;
  Vars.LogHistory := Settings.LogHistory;
 end;
 
@@ -639,15 +643,16 @@ var
  sLogFile: string;
  Hist: string;
 begin
- LogStr(Format('[%s] %s %s: %s', [DateTimeToStr(Date), Channel, Author, Msg]));
+ if not Vars.Flags.DontRefreshViaPublic or (Channel = '@') then
+ begin
+  LogStr(Format('[%s] %s %s: %s', [DateTimeToStr(Date), Channel, Author, Msg]));
+ end;
  if (Channel = '@') and Vars.Sound.Enabled then
  begin
-  //PlaySoundAlert();
   Vars.Flags.PlaySoundAfterLastData := true;
  end;
  if (Channel = '&') and Vars.Sound.Enabled and Vars.Sound.Guild then
  begin
-  //PlaySoundAlert();
   Vars.Flags.PlaySoundAfterLastData := true;
  end;
  if not Vars.LogHistory then
@@ -656,11 +661,14 @@ begin
  end;
  if Channel = '@' then
  begin
-  sLogFile := GetContactHistory(Author);
-  Hist := format('[%s] %s', [DateTimeToStr(Date), Msg]);
-  AppendStr(sLogFile, Hist);
+  if not Vars.NoAddNewContacts or IsContact(Author) then
+  begin
+   sLogFile := GetContactHistory(Author);
+   Hist := format('[%s] %s', [DateTimeToStr(Date), Msg]);
+   AppendStr(sLogFile, Hist);
+  end;
  end;
- if (((Channel = '#') or (Channel = '$') or (Channel = '^')) and Vars.LogPublicChannels and not Vars.Flags.DontRefreshViaPublic) or (Channel = '%') or (Channel = '') or (Channel = '&') then
+ if (((Channel = '#') or (Channel = '$') or (Channel = '^')) and Vars.LogPublicChannels) or (Channel = '%') or (Channel = '') or (Channel = '&') then
  begin
   sLogFile := GetContactHistory(Channel);
   Hist := format('[%s] %s: %s', [DateTimeToStr(Date), Author, Msg]);

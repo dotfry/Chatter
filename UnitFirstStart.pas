@@ -29,9 +29,10 @@ TfrmFirstStart = class(TForm)
   cbStep: TComboBox;
   cbAlertGuildChat: TCheckBox;
   cbSaveOnlyAdded: TCheckBox;
-    tCustomSound: TEdit;
-    bBrowseCustom: TButton;
-    ood: TOpenDialog;
+  tCustomSound: TEdit;
+  bBrowseCustom: TButton;
+  ood: TOpenDialog;
+  od: TFileOpenDialog;
   procedure bNextClick(Sender: TObject);
   procedure bExitClick(Sender: TObject);
   procedure bBrowsePathClick(Sender: TObject);
@@ -39,7 +40,8 @@ TfrmFirstStart = class(TForm)
   procedure cbSaveHistoryClick(Sender: TObject);
   procedure cbStepChange(Sender: TObject);
   procedure bSaveClick(Sender: TObject);
-    procedure rbInternalSoundClick(Sender: TObject);
+  procedure rbInternalSoundClick(Sender: TObject);
+  procedure bBrowseCustomClick(Sender: TObject);
  private
   SetupDone: boolean;
   IsSetup: boolean;
@@ -63,6 +65,28 @@ begin
  begin
   Dec(StepId);
   SetupStep(StepId);
+ end;
+end;
+
+procedure TfrmFirstStart.bBrowseCustomClick(Sender: TObject);
+var
+ ft: TFileTypeItem;
+begin
+ if adIsWinXP() then
+ begin
+  if ood.Execute() then
+  begin
+   tCustomSound.Text := ood.FileName;
+  end;
+ end else begin
+  ft := od.FileTypes.Add();
+  ft.FileMask := '*.wav';
+  ft.DisplayName := 'Wave files (*.wav)';
+  if od.Execute() then
+  begin
+   tCustomSound.Text := od.FileName;
+  end;
+  od.FileTypes.Clear();
  end;
 end;
 
@@ -188,6 +212,7 @@ begin
  bExit.Caption := 'Exit';
  IsSetup := true;
  Caption := Format(HelpKeyword, ['first run']);
+ rbInternalSoundClick(nil);
  ShowModal();
  Result := SetupDone;
  ModifySetupObject(Settings);
@@ -220,6 +245,7 @@ begin
  cbPlayWhenPoEOpen.Checked := Settings.PlayWhenGameOpen;
  cbSaveHistory.Checked := Settings.LogHistory;
  cbSaveHistoryClick(nil);
+ rbInternalSoundClick(nil);
  cbSaveChannels.Checked := Settings.LogPublic;
  cbAlertGuildChat.Checked := Settings.AlertGuildChat;
  ShowModal();

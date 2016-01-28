@@ -49,6 +49,7 @@ type
  procedure adShowWinMsg(EditCtl: HWnd; Text: string; Caption: string; Icon: Integer; Balloon: Boolean = True);
 
  function StrRPos(const SubStr, Str: string): Integer;
+ function adIsWinXP(): Boolean;
 implementation
 
  function StrRPos(const SubStr, Str: string): Integer;
@@ -201,5 +202,15 @@ begin
   end;
   MessageBox(EditCtl, PChar(Text), PChar(Caption), btn);
  end;
+end;
+
+function adIsWinXP(): Boolean;
+var
+ oi: TOSVersionInfo;
+begin
+ FillChar(oi, SizeOf(oi), 0);
+ oi.dwOSVersionInfoSize := SizeOf(oi);
+ GetVersionEx(oi);
+ Result := (oi.dwPlatformId = VER_PLATFORM_WIN32_NT) and (oi.dwMajorVersion >= 5) and (oi.dwMinorVersion >= 1) and (oi.dwMajorVersion < 6);
 end;
 end.

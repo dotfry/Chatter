@@ -190,6 +190,7 @@ object frmFirstStart: TfrmFirstStart
       Height = 25
       Caption = #8230
       TabOrder = 5
+      OnClick = bBrowseCustomClick
     end
   end
   object bBack: TButton
@@ -248,6 +249,13 @@ object frmFirstStart: TfrmFirstStart
   object ood: TOpenDialog
     Filter = 'Wave file (*.wav)|*.wav'
     Left = 320
+    Top = 48
+  end
+  object od: TFileOpenDialog
+    FavoriteLinks = <>
+    FileTypes = <>
+    Options = []
+    Left = 352
     Top = 48
   end
 end
