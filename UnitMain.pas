@@ -83,6 +83,7 @@ TfrmMain = class(TForm)
   function  IsContact(Name: string): boolean;
   function  DeleteContact(Name: string): boolean;
   procedure CreateContact(Name: string);
+  procedure PlaySoundFromRes();
   procedure PlaySoundAlert();
   procedure SetHistoryState();
   procedure ApplySettings(Settings: TSetupInfo);
@@ -562,6 +563,11 @@ begin
  HandleMessage(sChannel, sAuthor, sShortInfo, dtInfo);
 end;
 
+procedure TfrmMain.PlaySoundFromRes();
+begin
+ PlaySound('REALGOODSND', HInstance, SND_RESOURCE or SND_ASYNC);
+end;
+
 procedure TfrmMain.PlaySoundAlert();
 begin
  // Dont blow things up due import. //
@@ -578,14 +584,14 @@ begin
  begin
   if Vars.Sound.Internal then
   begin
-   PlaySound('REALGOODSND', 0, SND_ASYNC and SND_RESOURCE);
+   PlaySoundFromRes();
   end else begin
    if FileExists(Vars.Sound.FileName) then
    begin
     PlaySound(PChar(Vars.Sound.FileName), 0, SND_ASYNC);
    end else begin
     // Playing "internal" (because user file broken).
-    PlaySound('REALGOODSND', 0, SND_ASYNC and SND_RESOURCE);
+    PlaySoundFromRes();
    end;
   end;
  end;
