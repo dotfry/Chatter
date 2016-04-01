@@ -7,6 +7,7 @@ unit UnitMain;
   ? Did someone have log file move that 4gb? (add support?)
   + Idea for reading chatlog & recieving new msgs
   + Dont blow via PlaySound while loading big part of msgs.
+  + Filter
   ? Toast windows
   ~ No automatic add to list
   - Manual adding to list :)
@@ -22,11 +23,19 @@ PoELogVars = record
  FileName, FilePath: string;
 end;
 PoEFlags = record
- JustInstalled, RequireFlush, MoreDataFollows, PlaySoundAfterLastData, StopImport, DontRefreshViaPublic: boolean;
+ JustInstalled, RequireFlush, MoreDataFollows, PlaySoundAfterLastData, StopImport, DontRefreshViaPublic, PlaySoundFilter: boolean;
 end;
 PoESound = record
  Internal, Enabled, WhileGameOpen, Guild: boolean;
  FileName: string;
+end;
+PoEFilterVar = record
+ Required: boolean;
+ Text: string;
+end;
+PoEFilter = record
+ Enabled: boolean;
+ Attr: array of PoEFilterVar;
 end;
 PoEVars = record
  Log: PoELogVars;
@@ -34,6 +43,7 @@ PoEVars = record
  Config: string;
  LogPublicChannels, LogHistory, RequireFlush, Terminating, NoAddNewContacts: boolean;
  XML: IXmlDocument;
+ Filter: PoEFilter;
  Contacts: IXmlNode;
  Flags: PoEFlags;
  Sound: PoESound;
@@ -56,6 +66,8 @@ TfrmMain = class(TForm)
   pmWhisper: TMenuItem;
   bStopImport: TButton;
   bClear: TBitBtn;
+  bFilter: TBitBtn;
+  tFilterOptions: TEdit;
   procedure tmrMainTimer(Sender: TObject);
   procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
   procedure bSoundClick(Sender: TObject);
@@ -68,8 +80,11 @@ TfrmMain = class(TForm)
   procedure pmDeleteClick(Sender: TObject);
   procedure bStopImportClick(Sender: TObject);
   procedure bClearClick(Sender: TObject);
+  procedure bFilterClick(Sender: TObject);
+  procedure tFilterOptionsChange(Sender: TObject);
  private
   procedure SoundState();
+  procedure FilterState();
  public
   procedure LogStr(Str: string; DebugFlag: boolean = false);
   procedure LoadNewData();
@@ -87,6 +102,7 @@ TfrmMain = class(TForm)
   procedure PlaySoundAlert();
   procedure SetHistoryState();
   procedure ApplySettings(Settings: TSetupInfo);
+  procedure FilterMessage(Text: string);
 end;
 
 var
@@ -109,6 +125,8 @@ const
  XMLC_Name = 'name';
  XMLC_WhileGameOpen = 'gameopen';
  XMLC_Guild = 'guild';
+ XMLC_Filter = 'filter';
+ XMLC_Text = 'text';
 var
  Vars: PoEVars;
 {$R *.dfm}
@@ -204,6 +222,12 @@ begin
  nCfg := Vars.XML.DocumentElement.SelectSingleNode(XMLConfiguration);
  if nCfg <> nil then
  begin
+  nSub := nCfg.SelectSingleNode(XMLC_Filter);
+  if nSub <> nil then
+  begin
+   Vars.Filter.Enabled := StrToBoolDef(nSub.GetAttr(XMLC_Enabled, 'false'), Vars.Filter.Enabled);
+   tFilterOptions.Text := nSub.GetAttr(XMLC_Text, '');
+  end;
   nSub := nCfg.SelectSingleNode(XMLC_Alert);
   if nSub <> nil then
   begin
@@ -261,6 +285,10 @@ begin
  if nSub = nil then nSub := nCfg.AppendElement(XMLC_Log);
  nSub.SetAttr(XMLC_File, Vars.Log.FilePath);
  nSub.SetAttr(XMLC_Position, IntToStr(Vars.Log.LastPos));
+ nSub := nCfg.SelectSingleNode(XMLC_Filter);
+ if nSub = nil then nSub := nCfg.AppendElement(XMLC_Filter);
+ nSub.SetAttr(XMLC_Text, tFilterOptions.Text);
+ nSub.SetAttr(XMLC_Enabled, BoolToStr(Vars.Filter.Enabled));
  Vars.XML.Save(Vars.Config);
 end;
 
@@ -272,6 +300,37 @@ end;
 procedure TfrmMain.bClearClick(Sender: TObject);
 begin
  tDetailedInfo.Clear();
+end;
+
+procedure TfrmMain.bFilterClick(Sender: TObject);
+begin
+ Vars.Filter.Enabled := not Vars.Filter.Enabled;
+ FilterState();
+end;
+
+procedure TfrmMain.FilterState();
+ function getImageId(Flag: boolean): integer;
+ begin
+  Result := 0;
+  if Flag then Result := 1;
+ end;
+var
+ bTemp: TBitmap;
+ iSize: integer;
+begin
+ bTemp := TBitmap.Create();
+ il.GetBitmap(getImageId(Vars.Filter.Enabled) + 2, bTemp);
+ bFilter.Glyph := bTemp;
+ FreeAndNil(bTemp);
+ if tFilterOptions.Visible <> Vars.Filter.Enabled then
+ begin
+  tFilterOptions.Visible := Vars.Filter.Enabled;
+  iSize := tFilterOptions.Height + (tFilterOptions.Top - (bSettings.Top + bSettings.Height));
+  if Vars.Filter.Enabled then iSize := -iSize;
+  tDetailedInfo.Top := tDetailedInfo.Top - iSize;
+  tDetailedInfo.Height := tDetailedInfo.Height + iSize;
+ end;
+ tFilterOptionsChange(nil);
 end;
 
 procedure TfrmMain.bSettingsClick(Sender: TObject);
@@ -357,6 +416,7 @@ begin
   Vars.Flags.JustInstalled := true;
   ApplySettings(Settings);
   SoundState();
+  FilterState();
   SetHistoryState();
   tmrMain.Enabled := true;
   exit;
@@ -364,8 +424,54 @@ begin
  LoadSettings();
  Vars.Flags.JustInstalled := false;
  SoundState();
+ FilterState();
  SetHistoryState();
  tmrMain.Enabled := true;
+end;
+
+procedure TfrmMain.tFilterOptionsChange(Sender: TObject);
+var
+ aStr: TStringArr;
+ i, id: integer;
+begin
+ // Filter: ~lf1m|lf2m|lf3m|lf4m todo or filter
+ // zana -lfg 
+ aStr := explode(' ', tFilterOptions.Text);
+ id := 0;
+ for i := Low(aStr) to High(aStr) do
+ begin
+  if aStr[i] <> '' then
+  begin
+   SetLength(Vars.Filter.Attr, id + 1);
+   if Copy(aStr[i], 0, 1) = '-' then
+   begin
+    Vars.Filter.Attr[id].Required := false;
+    Vars.Filter.Attr[id].Text := AnsiLowerCase(Copy(aStr[i], 1));
+   end else begin
+    Vars.Filter.Attr[id].Required := true;
+    Vars.Filter.Attr[id].Text := AnsiLowerCase(aStr[i]);
+   end;
+   //LogStr(Format('"%s":%s', [Vars.Filter.Attr[id].Text, BoolNames[Vars.Filter.Attr[id].Required]]));
+   Inc(id);
+  end;
+ end;
+end;
+
+procedure TfrmMain.FilterMessage(Text: string);
+var
+ i: integer;
+begin
+ // Filtering.
+ Text := AnsiLowerCase(Text);
+ if Length(Vars.Filter.Attr) = 0 then exit;
+ for i := Low(Vars.Filter.Attr) to High(Vars.Filter.Attr) do
+ begin
+  if Vars.Filter.Attr[i].Required <> (AnsiPos(Vars.Filter.Attr[i].Text, Text) <> 0) then
+  begin
+   exit;
+  end;
+ end;
+ Vars.Flags.PlaySoundFilter := true;
 end;
 
 procedure TfrmMain.tmrMainTimer(Sender: TObject);
@@ -501,11 +607,12 @@ begin
   Vars.Log.LastPos := Vars.Log.LastSize;
   HandleData(sNewData);
  end;
- if Vars.Flags.PlaySoundAfterLastData then
+ if Vars.Flags.PlaySoundAfterLastData or Vars.Flags.PlaySoundFilter then
  begin
   Vars.Flags.MoreDataFollows := false;
   Vars.Flags.PlaySoundAfterLastData := false;
   PlaySoundAlert();
+  Vars.Flags.PlaySoundFilter := false;
  end;
 end;
 
@@ -580,7 +687,7 @@ begin
  begin                 
   exit;
  end;
- if (GetForegroundWindow() <> Vars.Handle) or (Vars.Sound.WhileGameOpen) then
+ if (GetForegroundWindow() <> Vars.Handle) or Vars.Sound.WhileGameOpen or Vars.Flags.PlaySoundFilter then
  begin
   if Vars.Sound.Internal then
   begin
@@ -649,6 +756,10 @@ var
  sLogFile: string;
  Hist: string;
 begin
+ if Vars.Filter.Enabled then
+ begin
+  FilterMessage(Msg);
+ end;
  if not Vars.Flags.DontRefreshViaPublic or (Channel = '@') then
  begin
   LogStr(Format('[%s] %s %s: %s', [DateTimeToStr(Date), Channel, Author, Msg]));
