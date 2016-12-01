@@ -7,4 +7,4 @@ Chatter is a simple application developed for archiving Path of Exile chat logs,
 * Dunno
 
 # Downloads
-If you want compiled version lastest available here: https://6dreams.net/chatter.zip
+Lastest stable version lastest available [here](https://github.com/dotfry/Chatter/releases).
