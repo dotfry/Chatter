@@ -18,6 +18,7 @@ interface uses Windows, Messages, SysUtils, Variants, Classes, Graphics, Control
   ComCtrls, Menus, Clipbrd;
 
 type
+PoEFilterFlag = (PFF__EXISTS, PFF__NO_EXISTS, PFF__LIST_OR);
 PoELogVars = record
  LastSize, LastPos: LongWord;
  FileName, FilePath: string;
@@ -30,7 +31,7 @@ PoESound = record
  FileName: string;
 end;
 PoEFilterVar = record
- Required: boolean;
+ Flag: PoEFilterFlag;
  Text: string;
 end;
 PoEFilter = record
@@ -90,7 +91,7 @@ TfrmMain = class(TForm)
   procedure LoadNewData();
   procedure HandleData(Str: string);
   procedure HandleLine(Str: string);
-  procedure HandleMessage(Channel, Author, Msg: String; Date: TDateTime);
+  procedure HandleMessage(Channel, Author, Msg: String; Date: TDateTime; IsIncoming: boolean);
   procedure SaveSettings();
   procedure LoadSettings();
   function  GetContactHistory(CName: string): string;
@@ -127,6 +128,7 @@ const
  XMLC_Guild = 'guild';
  XMLC_Filter = 'filter';
  XMLC_Text = 'text';
+
 var
  Vars: PoEVars;
 {$R *.dfm}
@@ -433,6 +435,7 @@ procedure TfrmMain.tFilterOptionsChange(Sender: TObject);
 var
  aStr: TStringArr;
  i, id: integer;
+ prefix: string;
 begin
  // Filter: ~lf1m|lf2m|lf3m|lf4m todo or filter
  // zana -lfg 
@@ -443,13 +446,20 @@ begin
   if aStr[i] <> '' then
   begin
    SetLength(Vars.Filter.Attr, id + 1);
-   if Copy(aStr[i], 0, 1) = '-' then
+   prefix := Copy(aStr[i], 0, 1);
+   if (prefix = '-') or (prefix = '!') then
    begin
-    Vars.Filter.Attr[id].Required := false;
-    Vars.Filter.Attr[id].Text := AnsiLowerCase(Copy(aStr[i], 1));
+    Vars.Filter.Attr[id].Flag := PFF__NO_EXISTS;
+    Vars.Filter.Attr[id].Text := AnsiLowerCase(Copy(aStr[i], 2));
    end else begin
-    Vars.Filter.Attr[id].Required := true;
-    Vars.Filter.Attr[id].Text := AnsiLowerCase(aStr[i]);
+    if prefix = '~' then
+    begin
+     Vars.Filter.Attr[id].Flag := PFF__LIST_OR;
+     Vars.Filter.Attr[id].Text := AnsiLowerCase(Copy(aStr[i], 2));
+    end else begin
+     Vars.Filter.Attr[id].Flag := PFF__EXISTS;
+     Vars.Filter.Attr[id].Text := AnsiLowerCase(aStr[i]);
+    end;
    end;
    //LogStr(Format('"%s":%s', [Vars.Filter.Attr[id].Text, BoolNames[Vars.Filter.Attr[id].Required]]));
    Inc(id);
@@ -459,16 +469,37 @@ end;
 
 procedure TfrmMain.FilterMessage(Text: string);
 var
- i: integer;
+ i, n: integer;
+ aStr: TStringArr;
+ bValid: boolean;
 begin
  // Filtering.
  Text := AnsiLowerCase(Text);
  if Length(Vars.Filter.Attr) = 0 then exit;
  for i := Low(Vars.Filter.Attr) to High(Vars.Filter.Attr) do
  begin
-  if Vars.Filter.Attr[i].Required <> (AnsiPos(Vars.Filter.Attr[i].Text, Text) <> 0) then
-  begin
-   exit;
+  case Vars.Filter.Attr[i].Flag of
+   { thisMustExists: zana free }
+   PFF__EXISTS: begin
+    if AnsiPos(Vars.Filter.Attr[i].Text, Text) = 0 then exit;
+   end;
+   { thisMustNotExists: !lf1m -lf1m }
+   PFF__NO_EXISTS: begin
+    if AnsiPos(Vars.Filter.Attr[i].Text, Text) <> 0 then exit; 
+   end;
+   { oneOfItemsExists: ~lf1m|lf2m|lf3m|lf4m|lf5m }
+   PFF__LIST_OR: begin
+    aStr := explode('|', Vars.Filter.Attr[i].Text);
+    bValid := false;
+    for n := Low(aStr) to High(aStr) do
+    begin
+     if AnsiPos(aStr[n], Text) <> 0 then
+     begin
+      bValid := true;
+     end;
+    end; 
+    if not bValid then exit;        
+   end;
   end;
  end;
  Vars.Flags.PlaySoundFilter := true;
@@ -492,6 +523,7 @@ begin
  // TODO: Move all vars to int64.
  // TODO: Check steam version.
  // TODO: Add more checks?
+ if not IsWindow(Vars.Handle) then Vars.Handle := INVALID_HANDLE_VALUE; 
  if Vars.Handle = INVALID_HANDLE_VALUE then
  begin
   hPoe := FindWindow('Direct3DWindowClass', 'Path of Exile');
@@ -529,7 +561,7 @@ end;
 
 procedure TfrmMain.LoadNewData();
 const
- MaxBufferSize = 10240;
+ MaxBufferSize = 51200;
 var
  fHandle: THandle;
  pText: PChar;
@@ -605,7 +637,9 @@ begin
  end else begin
   sNewData := ReadRawData(iBuffSize);
   Vars.Log.LastPos := Vars.Log.LastSize;
+  tDetailedInfo.Lines.BeginUpdate();
   HandleData(sNewData);
+  tDetailedInfo.Lines.EndUpdate();
  end;
  if Vars.Flags.PlaySoundAfterLastData or Vars.Flags.PlaySoundFilter then
  begin
@@ -633,16 +667,30 @@ end;
 
 // 2015/06/13 15:52:28 18251336 22d [INFO Client 3084] TopSkill: qq
 procedure TfrmMain.HandleLine(Str: string);
+ function getPlayerName(S: string): string;
+ var
+   gNickWInfo: TStringArr;
+ begin
+   gNickWInfo := explode('>', S, 2);
+   if Length(gNickWInfo) = 2 then
+   begin
+     Result := Trim(gNickWInfo[1]);
+   end else begin
+     Result := S;
+   end;
+ end;
 const
- aChannels: array[0..5] of string = ('#', '^', '$', '@', '%', '&');
+ aChannels: array[0..4] of string = ('#', '^', '$', '%', '&');
 var
  iPos, i: integer;
  sShortInfo, sAvgTime: string;
  sChannel, sTmpChannel, sAuthor: string;
- aInfo: TStringArr;
+ aInfo, nickWInfo: TStringArr;
  dtInfo: TDateTime;
+ bIsIncome: boolean;
 begin
  iPos := AnsiPos(']', Str);
+ bIsIncome := false;
  if iPos = -1 then exit; // unknown log string
  sShortInfo := Copy(Str, iPos + 2, Length(Str) - iPos - 1);
  sAvgTime := poeFormatDate(Copy(Str, 1, 19));
@@ -655,10 +703,12 @@ begin
  aInfo := explode(':', sShortInfo, 2);
  if Length(aInfo) <> 2 then exit; // no message..
  if aInfo[0] = 'Object' then exit; // some trash message.
- if Length(explode(' ', aInfo[0])) > 1 then exit; // not valid player name.
+ if Length(explode(' ', aInfo[0])) > 2 then exit; // that is something not like: #<Guild> Name
+ if Trim(aInfo[0]) = '' then exit; // Length of NameStr = 0
+ 
  sTmpChannel := Copy(aInfo[0], 1, 1);
  sAuthor := aInfo[0];
- sShortInfo := aInfo[1];
+ sShortInfo := aInfo[1]; // Message!
  for i := Low(aChannels) to High(aChannels) do
  begin
   if sTmpChannel = aChannels[i] then
@@ -667,7 +717,16 @@ begin
    sAuthor := Copy(sAuthor, 2, Length(sAuthor));
   end;
  end;
- HandleMessage(sChannel, sAuthor, sShortInfo, dtInfo);
+ if sTmpChannel = '@' then
+ begin
+   nickWInfo := explode(aInfo[0], ' ', 2);
+   if Length(nickWInfo) <> 2 then exit; // Msg broken.
+   
+   bIsIncome := LowerCase(Copy(nickWInfo[0], 1, 2)) <> 'to';
+   sAuthor := nickWInfo[1];
+   sChannel := sTmpChannel;
+ end;
+ HandleMessage(sChannel, getPlayerName(sAuthor), Trim(sShortInfo), dtInfo, bIsIncome);
 end;
 
 procedure TfrmMain.PlaySoundFromRes();
@@ -751,7 +810,7 @@ begin
  Vars.LogHistory := Settings.LogHistory;
 end;
 
-procedure TfrmMain.HandleMessage(Channel, Author, Msg: String; Date: TDateTime);
+procedure TfrmMain.HandleMessage(Channel, Author, Msg: String; Date: TDateTime; IsIncoming: boolean);
 var
  sLogFile: string;
  Hist: string;
@@ -766,7 +825,7 @@ begin
  end;
  if (Channel = '@') and Vars.Sound.Enabled then
  begin
-  Vars.Flags.PlaySoundAfterLastData := true;
+  Vars.Flags.PlaySoundAfterLastData := IsIncoming;
  end;
  if (Channel = '&') and Vars.Sound.Enabled and Vars.Sound.Guild then
  begin
@@ -808,6 +867,7 @@ begin
  end;
  Vars.RequireFlush := false;
  tDetailedInfo.Lines.Add(Str);
+ //tDetailedInfo.ScrollBy(0, 1);
 end;
 
 procedure TfrmMain.AppendStr(F, S: string);
